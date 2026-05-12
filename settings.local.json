@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(jj st *)",
+      "Bash(jj log *)",
+      "Bash(vc-x1 sync *)",
+      "WebSearch",
+      "Bash(git submodule *)",
+      "Read(//home/wink/data/prgs/rust/vc-x1/**)",
+      "Bash(find / -name jj-revsets.md)"
+    ]
+  }
+}

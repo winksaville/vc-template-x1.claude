@@ -1,0 +1,1126 @@
+--- vc-template-x1/CLAUDE.md	2026-05-12 07:41:23.083562523 -0700
++++ vc-x1/CLAUDE.md	2026-05-11 12:34:43.091244777 -0700
+@@ -9,49 +9,12 @@
+ 
+ Both repos are managed with `jj` (Jujutsu), which coexists with git.
+ 
+-### Why two repos
+-
+-The split exists to keep the *what* separate from the *why* and
+-*how*, while preserving both as durable history:
+-
+-- **App repo** holds the "what" — code, docs, notes; the artefact
+-  the project is producing.
+-- **Bot session repo** holds the "why" and "how" — the bot's
+-  reasoning, dead ends, and in-session context that produced
+-  each change.
+-- **Cross-referencing** the two via `ochid:` trailers (see below)
+-  produces a coherent narrative across time. Any future reader —
+-  human or bot — can land on a commit and jump to its session
+-  counterpart to recover the *why*.
+-- **Splitting** also keeps app history free of session noise
+-  while preserving session data instead of discarding it after
+-  the turn.
+-
+-### ochid trailers
+-
+-Every commit body must include an `ochid:` trailer pointing to the
+-counterpart commit in the other repo. The value is a workspace-root-relative
+-path followed by the changeID:
+-
+-- App repo commits point to `.claude`: `ochid: /.claude/<changeID>`
+-- Bot session commits point to app repo: `ochid: /<changeID>`
+-
+-`vc-x1 push` appends the correct trailer per repo automatically.
+-For manual commits, use `vc-x1 chid -R .,.claude -L` to get both
+-changeIDs (first line is app repo, second is `.claude`).
+-
+ ## Repo Paths (relative from project root)
+ 
+ - App repo: `.` (project root)
+ - Bot session repo: `.claude`
+   (symlink from `~/.claude/projects/<path-to-project-root>/.claude`)
+ 
+-The bot session repo is this project's **`other-repo`** — the
+-path is set by `[workspace].other-repo` in `.vc-config.toml`
+-(default `.claude`, as used here). Concrete examples below use
+-`.claude` for readability; treat the path as configurable where
+-it appears in prose.
+-
+ ## Working Directory
+ 
+ Prefer staying in the project root. Use `-R` flags or absolute paths
+@@ -61,8 +24,8 @@
+ 
+ When invoking shell commands, prefer the shortest unambiguous path —
+ usually relative to cwd (`ls notes/`, not
+-`ls /home/wink/data/prgs/rust/vc-template-x1/notes/`). Long absolute
+-paths clutter the transcript without adding information. Out-of-workspace
++`ls /home/wink/data/prgs/rust/vc-x1/notes/`). Long absolute paths
++clutter the transcript without adding information. Out-of-workspace
+ paths (`/tmp/...`, `~/.config/...`) stay absolute. Read/Edit/Write
+ tool args also stay absolute — that's a tool-boundary constraint,
+ not a stylistic choice.
+@@ -103,111 +66,13 @@
+ state"), a prediction ("this should scale linearly"), or any
+ reasoning not directly supported by the data on hand.
+ 
+-## Writing style: prefer sub-bullets
+-
+-Durable text the bot writes should itemize with sub-bullets
+-rather than run as large prose paragraphs. Applies to:
++## Committing
+ 
+-- `notes/chores-*.md`, `notes/todo.md`, committed READMEs, design notes.
+-- Module `//!` docstrings, item `///` doc comments on traits / structs / functions / methods, and any other doc comment that runs more than a few sentences.
++Use `-R` (`--repository`) at the end to target the correct repo. Use
++relative paths to reduce noise. Putting `-R` last keeps the verb/action
++visible at the start of the command.
+ 
+-Short intro sentences (1–3) at the top of a section / item are
+-fine; detail goes into hierarchical bullet lists.
+-
+-**Why:** easier to scan and cross-reference during review;
+-matches how the user reads and edits committed reference
+-material. A wall of prose hides structure that a nested list
+-makes visible — and the same is true inside doc comments,
+-where rustdoc renders the list cleanly.
+-
+-**How to apply:**
+-
+-- Default to bullet structure for any non-trivial section or
+-  doc comment. Reserve paragraphs for brief intros and
+-  occasional contextual framing.
+-- If a paragraph runs past ~3 sentences, look for the implicit
+-  list inside it and break it out.
+-- Design-decision entries benefit most — the *reason* /
+-  *what-was-rejected* / *how-it-applies* decomposition reads
+-  naturally as sub-bullets.
+-- Single-line doc comments on trivial methods stay one line —
+-  bullets are not mandatory, just *available* when content is
+-  long enough to warrant them.
+-
+-**Clap-derive args caveat.** Doc comments on `#[arg(...)]`
+-fields drive `--help` output. Clap reflows by default and
+-collapses bullets into running prose. Add
+-`#[arg(verbatim_doc_comment, ...)]` on any field whose doc
+-comment uses bullets so each `- …` lands on its own line in
+-the rendered help.
+-
+-## jj Basics
+-
+-- `jj st -R .` / `jj st -R .claude` — show working copy status
+-- `jj log -R .` / `jj log -R .claude` — show commit log
+-- `jj commit -m "title" -m "body" -R <repo>` — finalize working copy into a commit
+-- `jj describe -m "title" -m "body" -R <repo>` — set description without committing
+-- `jj git push --bookmark <name> -R <repo>` — push a bookmark (no
+-  `--allow-new` flag; jj pushes new bookmarks without special flags)
+-- In jj, the working copy (@) is always a mutable commit being edited.
+-  `jj commit` finalizes it and creates a new empty working copy on top.
+-- The `.claude` repo always has uncommitted changes during an active
+-  session because session data updates continuously.
+-
+-## vc-x1 Basics
+-
+-`vc-x1` is the workspace tool that wraps jj operations across the
+-app and bot session repos. Once installed, it should drive 99% of
+-the commit / push / finalize flow — direct `jj` is the fallback
+-when something goes off-rails.
+-
+-Subcommands in current use (vc-x1 0.41.0; run
+-`vc-x1 <sub> --help` for the authoritative flag set):
+-
+-- `vc-x1 sync` — fetch and verify (or apply) bookmark divergence
+-  across all workspace repos. See
+-  [Pre-step: `vc-x1 sync`](#pre-step-vc-x1-sync) below.
+-- `vc-x1 push <bookmark>` — full commit + push + finalize flow
+-  with two interactive approval gates (review, then message).
+-  The primary command for shipping a step. See
+-  [Run `vc-x1 push`](#run-vc-x1-push) below.
+-- `vc-x1 finalize` — squash, set bookmark, and/or push a jj repo
+-  (every flag is opt-in). Used by `vc-x1 push` internally; also
+-  the manual fallback. See
+-  [Manual finalize fallback](#manual-finalize-fallback) below.
+-- `vc-x1 chid -R .,.claude -L` — print change IDs for the
+-  current working commit in each repo, one per line. Used to
+-  compose `ochid:` trailers when committing manually.
+-- `vc-x1 validate-desc` / `vc-x1 fix-desc` — verify (and repair)
+-  cross-repo commit descriptions, including `ochid:` trailers.
+-  `fix-desc` is dry-run by default.
+-- `vc-x1 desc` / `vc-x1 list` / `vc-x1 show` — read-only commit
+-  inspection helpers.
+-- `vc-x1 init` / `vc-x1 clone` / `vc-x1 symlink` — workspace
+-  bootstrap commands.
+-
+-The bot thinks `--scope` is an in-flight `vc-x1 push` flag
+-intended to let push work consistently across single-repo and
+-dual-repo workspaces; the default behavior remains dual-repo,
+-which is what this template demonstrates. When the user
+-references other in-flight flags, treat them as planned
+-additions until `vc-x1 push --help` lists them. For the
+-currently-shipped flag set, see
+-[Run `vc-x1 push`](#run-vc-x1-push) below.
+-
+-For the full command surface, run `vc-x1 --help` and
+-`vc-x1 <subcommand> --help`.
+-
+-## Commits
+-
+-### Per-repo commit commands
+-
+-When committing manually (i.e. not via `vc-x1 push`), use `-R`
+-(`--repository`) at the end to target the correct repo. Use
+-relative paths to reduce noise. Putting `-R` last keeps the
+-verb/action visible at the start of the command.
+-
+-#### App repo
++### App repo
+ ```
+ jj commit -m \
+ "title" \
+@@ -217,7 +82,7 @@
+ -R .
+ ```
+ 
+-#### Bot session repo
++### Bot session repo
+ ```
+ jj commit -m \
+ "title" \
+@@ -227,10 +92,20 @@
+ -R .claude
+ ```
+ 
+-(See [ochid trailers](#ochid-trailers) under Project Structure
+-for what the trailer is and why.)
++## jj Basics
++
++- `jj st -R .` / `jj st -R .claude` — show working copy status
++- `jj log -R .` / `jj log -R .claude` — show commit log
++- `jj commit -m "title" -m "body" -R <repo>` — finalize working copy into a commit
++- `jj describe -m "title" -m "body" -R <repo>` — set description without committing
++- `jj git push --bookmark <name> -R <repo>` — push a bookmark (no
++  `--allow-new` flag; jj pushes new bookmarks without special flags)
++- In jj, the working copy (@) is always a mutable commit being edited.
++  `jj commit` finalizes it and creates a new empty working copy on top.
++- The `.claude` repo always has uncommitted changes during an active
++  session because session data updates continuously.
+ 
+-### Commit message style
++## Commit Message Style
+ 
+ Use [Conventional Commits](https://www.conventionalcommits.org/) with
+ a version suffix:
+@@ -239,50 +114,105 @@
+ <type>: <short description> (<version>)
+ ```
+ 
+-- **Title**: target ~50 chars, short summary of *what* changed.
+-  Include the version. Common types: `feat`, `fix`, `refactor`,
+-  `test`, `docs`, `chore`.
+-- **Body** (same across both repos): short intro paragraph (1–3
+-  sentences), then a terse bullet list. Each bullet corresponds
+-  one-to-one with the edits structure already documented in
+-  `notes/chores-*.md` for this step — just the file and a
+-  one-line gist (e.g. `README.md: new Overview intro`). Do *not*
+-  restate the detail that lives in chores; the commit body is a
+-  scan-able index, not a duplicate. The chores section is the
+-  source of truth.
+-- **Session notes** (optional tail, appended to the body): if the
+-  session produced items worth preserving that don't fit the
+-  code-change index — in-session tooling work, dead ends,
+-  rationale — append a trailing subsection titled
+-  `## <other-repo> session notes:` (e.g.
+-  `## .claude session notes:`) with those items as bullets. The
+-  same body (main content plus any session-notes subsection)
+-  lands in both commits.
+-- **`ochid` trailer**: do *not* include `ochid:` in the body you
+-  pass via `--body`. `vc-x1 push` appends the correct per-repo
+-  trailer at the commit stages
+-  (`ochid: /.claude/<chid>` for the app-repo commit;
+-  `ochid: /<chid>` for the `.claude` commit). When committing
+-  manually, append the trailer yourself per the templates above.
++- **Title**: ≤50 chars (the "50" of the git 50/72 rule), a short
++  summary of *what* changed. The version suffix counts toward the
++  50 — the descriptive part gets whatever's left after `<type>: `
++  and ` (<version>)`, so favor terse phrasings (`port X to Context`
++  over `X → Context + XParams`) when the names run long. Common
++  types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
++- **Body line width**: wrap every body line at ≤72 cols (the "72"
++  of the 50/72 rule); bullet continuations indent two spaces.
++- **App-repo body**: short intro paragraph (1–3 sentences), then a
++  terse bullet list — one bullet per file changed, the file plus a
++  one-line gist (e.g. `README.md: new Overview intro`). This list
++  **is the source of truth** for the cycle's mechanical change
++  record; the chores section carries the narrative + design, not a
++  copy of it. Keep bullets terse — a scannable index, not prose;
++  promote any "why" to a chores `###` subsection.
++- **Session-repo body**: terse intro + a few session-activity
++  bullets. Doesn't need to mirror chores since it describes
++  in-session work, not code changes.
+ - Examples:
+   - `feat: add fix-ochid subcommand (0.22.0)`
+   - `fix: fix-ochid prefix bug (0.22.1)`
+   - `refactor: deduplicate common CLI flags (0.21.1)`
+ 
+-### Chores section headers
++## Pre-commit Requirements
+ 
+-Chores section headers use trailing version format:
++### User approval
+ 
+-```
+-## Description (X.Y.Z)
+-```
++Never execute commit, squash, push, or finalize commands without the
++user's explicit approval. Present changes for review first; only run
++them after the user confirms. This applies to late changes too —
++pause for review before squashing into an existing commit.
+ 
+-Example: `` ## Add `fn claude-symlink` (0.27.0) ``
++### Review before proposing the commit block
++
++After finishing a unit of work, **summarize what changed and stop
++there**. Do not pre-emptively lay out the Checkpoint-1 commit
++commands. Wait for the user to signal review is complete before
++proposing the commit block. Changes during review are the norm,
++not the exception; proposing commit text too early creates noise
++and signals that I consider the work done when it usually isn't.
++
++This applies per-step in a multi-step flow too — each step gets a
++review pause before its commit block appears.
++
++Signals that review is complete include explicit approval ("let's
++commit", "looks good, commit it") **and any directive to start the
++next step** ("do step 4", "next", "go N+1"). In that case the
++previous step must be committed first — always commit the current
++step before starting the next; don't ask.
++
++### Per-file review checkpoints
++
++The "review before commit block" rule applies to in-progress work
++too, at finer grain. After each file edit, STOP, summarize what
++changed, and wait for explicit go-ahead before touching the next
++file or running follow-on commands (cargo test/install, dogfood
++invocations, `vc-x1 …`, etc.).
++
++**Exceptions** — both ride along with the change they accompany,
++no separate review pause:
++
++- **Refactors where code is moving across files** — e.g.
++  lifting helpers into a new module and updating the original
++  file's imports in the same change. Reviewing each half in
++  isolation isn't useful.
++- **`Cargo.toml` version bumps** that go with a specific code
++  change.
++
++**Why:** the user reviews diffs as work lands. Chaining multiple
++file edits without pausing forces them to untangle cumulative
++state instead of inspecting each step in isolation.
++
++**How to apply:**
++
++- "continue", "go", "do it", "lg" approves *the next unit
++  only*, not all remaining units of a multi-file plan. A green
++  light to proceed with a *direction* is not a green light to
++  skip per-step checkpoints.
++- After landing a unit: brief summary (2–5 lines) and stop. No
++  cargo build / test / install / dogfood runs unless the user
++  explicitly asks.
++- In addition to (not replacement for) the
++  Review-before-commit-block rule above.
++- **Sub-step exception:** within a multi-step cycle's
++  sub-step (or sub-sub-step) ladder, the per-step checkpoints
++  defer to the commit-first review model — see
++  [Sub-step Workflow > Commit-first review model](#commit-first-review-model).
++  Sub-step commits land as the bot finishes them; user reviews
++  the committed revision in their editor. The cycle-level
++  push at close-out keeps the two-gate ceremony.
+ 
+ ### Notes references
+ 
+-Multiple references must be separated: `[2],[3]` not `[2,3]` or `[2][3]`.
+-See [Todo format](notes/README.md#todo-format) for details.
++Reference *citations* are double-bracketed so the brackets render
++— `[[N]]`, or `[[2]],[[3]]` for several (comma-separated, not
++`[2,3]` or `[[2]][[3]]`). The `[N]:` definitions in a file's
++`# References` section and inline `[text](url)` / `[text](#anchor)`
++links stay single-bracketed. See
++[Todo format](notes/README.md#todo-format) for details.
+ 
+ ### Markdown anchor links
+ 
+@@ -296,6 +226,387 @@
+ de-facto reference implementation is
+ [github-slugger](https://github.com/Flet/github-slugger).
+ 
++### Versioning
++
++Every plan must start with a version bump. Choose the approach based
++on scope:
++
++- **Single-step** (recommended for mechanical/focused changes): bump
++  directly to `X.Y.Z`, implement in one commit. Simpler history.
++- **Multi-step** (for exploratory/large changes): bump to `X.Y.Z-0`,
++  implement across multiple commits incrementing the numeric
++  suffix. The final commit drops the suffix.
++
++The plan should recommend one approach and get user approval before
++starting.
++
++For multi-step:
++
++1. Bump version to `X.Y.Z-0` with the plan and commit as a chore
++   marker.
++2. Implement in one or more `X.Y.Z-N` commits (increment N as
++   needed).
++3. Final commit bumps to `X.Y.Z` (no suffix), updates
++   `notes/todo.md` and `notes/chores-*.md` — this is the "done"
++   marker.
++
++Multi-step cycles surface the ladder at the top of
++`notes/todo.md > ## In Progress` as a bullet list with `(done)` /
++`(current)` markers — see the file's intro paragraph for the
++format. When starting a new step, the *first* edit is to mark
++that step `(current)` in `notes/todo.md` — before any code/doc
++work — so the In Progress view reflects what's actually
++happening. The flip back to `(done)` is part of the pre-commit
++checklist (item 6).
++
++**Why numeric suffixes (`-0`, `-1`, …) rather than `-devN`:**
++semver pre-release identifiers may consist of a single numeric
++component, and they compare numerically per spec. So
++`X.Y.Z-1 < X.Y.Z-2 < … < X.Y.Z` correctly orders the dev ladder
++below the done marker. Cargo accepts this form. The `-dev` prefix
++adds no information the git log doesn't already convey and
++doubles typing per commit.
++
++The final release commit (no suffix) signals completion rather than
++amending prior commits. This keeps history readable and makes it easy
++to see which commits were exploratory vs final.
++
++For decomposition finer than `X.Y.Z-N` — sub-steps (`X.Y.Z-N.M`)
++or sub-sub-steps (`X.Y.Z-N.M-K`) — see
++[Sub-step Workflow](#sub-step-workflow). The cycle close-out
++choice (squash to one commit vs land each sub-step separately)
++is made at close-out, not cycle start.
++
++See also [`notes/substep-protocol.md`](notes/substep-protocol.md)
++for the full protocol — when to use, per-substep contract
++(`cargo test --bins` is non-negotiable), navigation, the validated
++close-out squash recipe, and recovery. Revset primitives the
++protocol relies on (`@`, `@-`, `..`, `::`, prefix matching) live in
++[`notes/jj-revsets.md`](notes/jj-revsets.md).
++
++### Headings and entries that record a commit
++
++A `chores-NN.md` `##` section header that records a specific
++commit, the matching `todo.md > ## Done` entry, and any `[N]`
++reference to that section all use **exactly that commit's
++title** — `<type>: <desc> (<version>)`, the same string the
++commit gets (see [Commit Message Style](#commit-message-style)).
++E.g. the chores header `## refactor: port push to Context
++(0.48.0-6)` and the Done line `- refactor: port push to Context
++(0.48.0-6) [[3]]`. For a multi-step cycle the `## Done` entry
++uses the close-out commit's title.
++
++This does **not** apply to organizational headings (`## Todo`,
++`## In Progress`, `# References`) or to design `###` subsections
++inside a chores section — those are named for whatever fits.
++Among the commit-recording ones, exact match is the strong
++default (nothing absolute): a near-miss just makes it harder to
++line a record up with its commit.
++
++A commit-recording header is provisional while the work is in
++progress; the *last* edit before `vc-x1 push` syncs it — and the
++`## Done` entry / `[N]` anchor for that commit — to the final
++commit title. See [Markdown anchor links](#markdown-anchor-links)
++for the slug algorithm; the pre-commit checklist catches a
++dangling `#anchor`, and a future `vc-x1 validate-repo` should too
++(and should verify the recorded title matches the commit).
++
++Existing sections and `## Done` entries (most of chores-01..09;
++the pre-`0.48.1` `## Done` lines) predate this and keep their
++free-form text; the convention applies going forward — `0.48.2`
++converts the `0.48.1` section + its Done entry as the worked
++example.
++
++### Chores section content — no edit list; git is the record
++
++A chores section is: a `Commits:` line (first line under the
++header — see below), a short intro paragraph (what changed and
++*why*, a notch above file-list granularity), and any `###`
++design subsections. It does **not** carry a per-file edit list —
++that lives in the commit message body, which is the source of
++truth for "what changed mechanically" (immutable, `git
++show`-able, naturally scoped to the commit). The chores section
++is the source of truth for the design thinking; the two
++cross-link, neither restates the other.
++
++When the intro starts wanting to explain a mechanism,
++hypothesis, or wrinkle, don't inflate it — promote that to its
++own `###` subsection inside the same `chores-NN.md`. If the
++wrinkle is a live design concern (something that *should*
++change, not just be recorded), also add a `notes/todo.md` item
++with a `[N]` ref pointing at that subsection (todo→chores is the
++normal ref direction).
++
++**Why:** a chores edit list and the commit body were specified
++to be the same content in two places — and detail written twice
++drifts. Git owns the mechanical record; chores owns the
++narrative; `Commits:` links them.
++
++### Chores commit references
++
++The first line under a chores section header is a `Commits:`
++line citing the git commit(s) that section records:
++
++```
++## refactor: port push to Context (0.48.0-6)
++
++Commits: [[3]]
++
++<intro paragraph...>
++```
++
++`Commits:` uses the file-local `[N]` reference machinery (see
++[notes/README.md](notes/README.md#reference-numbering)),
++**double-bracketed** so the brackets render — `Commits: [[3]]`,
++or `Commits: [[3]],[[5]]` for several. (`[[3]]` shows as a
++literal `[`, the `[3]` link, then a literal `]`; the inner
++`[3]` resolves against its `[3]:` definition — CommonMark /
++GitHub / VS Code all do this.) The `# References` definition
++puts the **commit URL** as the destination, with the **full
++40-hex SHA** in the title slot:
++
++```
++[3]: https://github.com/winksaville/vc-x1/commit/<12-hex> "<40-hex>"
++```
++
++- The 12-hex short SHA in the URL keeps it short; GitHub /
++  GitLab resolve a unique prefix to the canonical commit page
++  (GitLab's path has a `/-/` before `commit/`).
++- The full SHA in the title is host-agnostic and unambiguous —
++  it survives a repo host change, `git show <40-hex>` works in
++  any clone, and external tooling scraping the notes (a
++  database, say) gets the canonical identifier.
++
++**Timing.** The commit doesn't exist when its chores section is
++written, so the `Commits:` line is **backfilled when the next
++change to that repo is started** — the cycle-start step grabs
++the just-pushed commit's URL + SHA and fills it in. The single
++newest section is briefly `Commits:`-less; that's fine — the
++commit itself is the record, and `git log --grep "(X.Y.Z)"`
++finds it.
++
++### Pre-commit checklist
++
++At cycle *start* (before the version bump): backfill the
++previous chores section's `Commits:` ref with the just-pushed
++commit's URL + full SHA — see
++[Chores commit references](#chores-commit-references).
++
++Before proposing a commit, run all of the following and fix any issues:
++
++1. `cargo fmt`
++2. `cargo clippy`
++3. `cargo test`
++4. `cargo install --path . --locked` (if applicable) — `--locked`
++   is required: without it, `cargo install` ignores `Cargo.lock`
++   and re-resolves from scratch, which can pick incompatible
++   versions even when `cargo build` / `cargo test` succeed.
++5. Retest after install
++6. Update `notes/todo.md` — for multi-step cycles, flip the
++   just-completed step's marker from `(current)` to `(done)`
++   **before** running `vc-x1 push`. The commit being pushed
++   should reflect the new state. (The next step's `(current)`
++   marker is set later, at the *start* of that step — see the
++   Versioning multi-step section.)
++7. Update `notes/todo.md` — at cycle close-out (final commit),
++   move the entry from `## In Progress` to `## Done`.
++8. Update `notes/chores-*.md` — add a section (header =
++   provisional commit title; intro paragraph + any `###` design
++   subsections; **no** per-file edit list — that's the commit
++   body).
++9. Sync the chores section header to the **final** commit title
++   and update every markdown anchor back-reference to it.
++10. Update `notes/README.md` — if functionality changed (new
++    flags, new subcommands, changed behavior).
++
++## Sub-step Workflow
++
++Larger work decomposes into named depths. The version-suffix
++scheme nests:
++
++- **Single step** — one change, one commit + push + finalize.
++- **Multi-step** — planned series within a target bump:
++  `0.5.0 → 0.6.0-0`, `0.6.0-0 → 0.6.0-1`, …, `0.6.0-N → 0.6.0`.
++- **Sub-step** — finer granularity within a step:
++  `0.6.0-3.1 → 0.6.0-3.2 → … → 0.6.0-3` (close-out).
++- **Sub-sub-step** — finer still:
++  `0.6.0-3.4-0 → 0.6.0-3.4-1 → … → 0.6.0-3.4` (close-out).
++
++The conventions below apply at **whichever leaf depth the
++current cycle planned to** — sub-step, sub-sub-step, etc.
++"Sub-step" reads as shorthand for that leaf level throughout
++this section.
++
++### Version suffix in titles and Cargo.toml
++
++Sub-step commits carry the leaf-level version in commit titles
++**and** `Cargo.toml`. So `vc-x1 -V` shows the active sub-step
++at build time. Bump Cargo.toml at the start of each sub-step
++(extends the existing `X.Y.Z-N` step-start bump rule down a
++level).
++
++Cargo accepts arbitrary numeric segments in semver pre-release
++identifiers; lexical comparison gives the expected ordering
++(`0.6.0-3.4-1 < 0.6.0-3.4-2 < 0.6.0-3.4`).
++
++### todo.md status flips
++
++Markers in `notes/todo.md > ## In Progress` flip on a defined
++cadence:
++
++- **Start of (M):** mark (M) `(current)` as the first edit.
++- **End of (M):** flip (M) `(current)` → `(done)` **before**
++  the cargo cycle and commit. The commit captures the
++  completed state.
++- **Start of (M+1):** mark (M+1) `(current)` as that
++  sub-step's first edit.
++
++Each sub-step's commit carries the "this sub-step is done"
++record; the next sub-step's commit carries "next sub-step
++starts."
++
++### Pre-commit cargo cycle (per sub-step)
++
++Run before every sub-step commit (not just at cycle close-out):
++
++1. `cargo fmt`
++2. `cargo clippy --all-targets -- -D warnings`
++3. `cargo test`
++4. `cargo install --path . --locked`
++5. (re-test if anything substantive)
++
++Keeps every intermediate commit buildable so bisection works
++across the cycle's stack.
++
++### Commit-first review model
++
++Per sub-step:
++
++1. Make the sub-step changes.
++2. Run the cargo cycle.
++3. **Commit immediately** (both repos with ochid trailers, no
++   separate approval gate at sub-step granularity).
++4. Summarize the commit briefly in chat.
++5. User reviews the committed revision in their editor (full
++   file context, not chat-pasted diffs).
++6. User iterates if needed; bot squashes follow-ups into the
++   sub-step commit via `jj squash --into @-` (and
++   `jj describe @-` — plus the chores section header and its
++   anchor back-refs — if the title needs to change).
++7. User signals "go to (M+1)" to advance.
++
++This **replaces** the per-sub-step review pause that the
++top-level `### Review before proposing the commit block` and
++`### Per-file review checkpoints` rules would otherwise
++impose. Local jj commits are mutable until close-out, so
++committing freely is safe.
++
++The two-gate ceremony (review + message approval) is preserved
++for the **cycle-level push** at close-out — that crosses the
++local→remote boundary and warrants explicit approval.
++
++### Ochid trailers on sub-step commits
++
++Sub-step commits include ochid trailers paired across the two
++repos (same shape as top-level cycle commits):
++
++- App body: `ochid: /.claude/<.claude-chid>`
++- `.claude` body: `ochid: /<app-chid>`
++
++Use `vc-x1 chid -R .,.claude -L` to capture both pre-commit
++change IDs (first line app, second `.claude`).
++
++### `.claude` cadence
++
++`.claude` commits **per sub-step alongside the app repo**.
++Each sub-step's `.claude` commit captures the session state at
++that moment.
++
++Alternative considered (`.claude` accumulates across the cycle
++and commits once at close-out) was rejected — keeping the
++per-sub-step pairing preserves flexibility (any sub-step can
++be promoted to its own push without restructuring).
++
++**`.claude` is a linear journal — all session work lives on
++`main`.** The repo has no need for parallel feature-branch
++bookmarks to mirror app-side branches. When the app sits on
++e.g. `init-clone-refactor`, `.claude` still commits to `main`.
++Cross-references between sides are carried by the `ochid:`
++trailer + commit timestamps; that's enough to associate
++session activity with whichever app-side branch the cycle was
++on.
++
++**Do not create or maintain `.claude` bookmarks that mirror
++app-side branches.** This was tried once during 0.41.1-6.7 on
++the impression that an app-side fork needed a `.claude`
++partner; the partner bookmark went unused for the cycle and
++the work landed on `.claude main` regardless. Keeping such
++bookmarks risks the bot misreading them as "this branch needs
++to advance" and steering session pushes to the wrong remote
++ref.
++
++### Cycle close-out — squash or keep separate?
++
++Two valid shapes for landing the sub-step stack on `main`:
++
++- **Squash to one cycle commit** — single entry on `main`;
++  sub-step granularity preserved only in the commit body's
++  edit list. Right when the work is one logical change with
++  intermediate validation points. **Cost:** the per-sub-step
++  chores sections collapse into one, whose header becomes the
++  single close-out commit title, and every anchor back-ref to a
++  now-gone per-sub-step section gets re-pointed — real work,
++  done as part of the squash.
++- **Keep separate (N + 1 commits)** when the decomposition is
++  itself informative (different conceptual stages, design
++  progression worth showing in `git log`). Used on
++  `0.41.1-6.7` (8 sub-sub-step commits + 1 close-out commit).
++  Each section keeps its own header / `Commits:` ref — no
++  consolidation churn.
++
++Pick at close-out, not at cycle start. No firm default — weigh
++the squash's chores-consolidation cost against a cleaner
++`git log`; that cost biases toward keeping separate unless the
++decomposition genuinely isn't informative.
++
++### Reviewing committed sub-steps
++
++The commit-first model assumes the reviewer can read the diff
++of an already-committed revision. Don't `jj edit -r @-` back
++into a past commit to view it — that marks the commit mutable,
++shifts the WC pointer, forces a `jj new -r <head>` recovery.
++Use one of:
++
++**Terminal (always works):**
++
++```
++jj diff -r @-                  # diff of previous commit
++jj diff --from <X> --to <Y>    # diff between two arbitrary revs
++jj show -r <X>                 # description + diff for one rev
++jj log -r @-..@                # what's between two points
++```
++
++Pipe through `delta` / `diff-so-fancy | less -R` for color and
++side-by-side.
++
++**External diff tool** — configure jj to launch your editor:
++
++```
++# ~/.config/jj/config.toml
++[ui]
++diff-editor = ["zed", "--diff", "$left", "$right"]
++```
++
++Then `jj diff -r @-` opens the configured tool. Works for
++arbitrary `--from`/`--to` ranges.
++
++**VS Code** — Source Control panel → Commit Graph →
++right-click commit A → "Copy Commit ID" → right-click commit
++B → "Compare with…" → paste / pick A. Two-commit diff opens
++with the changed-files list. GitLens extension adds richer
++"Open Comparison" actions; `Git: Compare with…` in the
++Command Palette is a fallback.
++
+ ## Code Conventions
+ 
+ ### Doc comments on every file, function, and method
+@@ -311,10 +622,21 @@
+ inside function bodies remain discouraged unless they capture a
+ non-obvious WHY.
+ 
+-For longer doc comments, follow
+-[Writing style: prefer sub-bullets](#writing-style-prefer-sub-bullets)
+-— short intro then a bullet list, with the `verbatim_doc_comment`
+-caveat for clap-derive args.
++**Shape:** short intro (1–3 sentences, shorter is better), then
++a `-` bullet list for any structured details. Avoid long prose
++paragraphs — they read as a wall of text and hide the structure
++that bullets make scannable. Same shape applies to:
++
++- Module / function / struct / field doc comments in `.rs` files.
++- Chore descriptions in `notes/chores-NN.md`.
++- Todo entries in `notes/todo.md` (when an item needs more than
++  one line of detail; pure one-liners are still fine).
++
++**Clap-derive args:** doc comments on `#[arg(...)]` fields drive
++`--help` output. Clap reflows by default and collapses bullets
++into running prose. Add `#[arg(verbatim_doc_comment, ...)]` on
++any field whose doc comment uses bullets so each `- …` lands on
++its own line in the rendered help.
+ 
+ ### `// OK: …` comments on `unwrap*` calls (Rust)
+ 
+@@ -368,13 +690,29 @@
+ Continued flailing produces worse outcomes than a direct "I'm stuck
+ on X."
+ 
+-## Workflow
++## ochid Trailers
+ 
+-The end-to-end flow for a step is: **edit → review → commit → push
+-→ finalize**, executed via `vc-x1 push` with two interactive
+-approval gates (review, message). Finalize is launched detached as
+-the absolute last action in the turn so trailing bot writes land in
+-the session repo.
++Every commit body must include an `ochid:` trailer pointing to the
++counterpart commit in the other repo. The value is a workspace-root-relative
++path followed by the changeID:
++
++- App repo commits point to `.claude`: `ochid: /.claude/<changeID>`
++- Bot session commits point to app repo: `ochid: /<changeID>`
++
++Use `vc-x1 chid -R .,.claude -L` to get both changeIDs (first line
++is app repo, second is `.claude`).
++
++## Commit-Push-Finalize Flow
++
++**Use `vc-x1 push <bookmark>` — it wraps the full flow in one
++command with two interactive approval gates.** Push runs
++preflight (sync + fmt + clippy + test), prompts for review,
++composes the commit message (via `--title`/`--body` or `$EDITOR`),
++prompts for message approval, then commits both repos → advances
++bookmarks → pushes app → finalizes `.claude`. Failures inside the
++local mutation window roll both repos back via `jj op restore`;
++after `push-app` succeeds the remote boundary is crossed and
++recovery is forward-only.
+ 
+ **Run this flow after every step** — not only at session end.
+ Single-step and multi-step changes are of equal importance: a
+@@ -384,110 +722,79 @@
+ finalize — so dev markers land on the remote and in `.claude` as
+ they happen rather than being batched until the end.
+ 
+-### User approval points
+-
+-Never execute commit, squash, push, or finalize commands without
+-the user's explicit approval. Present changes for review first;
+-only run them after the user confirms. This applies to late
+-changes too — pause for review before squashing into an existing
+-commit. The two approval gates surfaced by `vc-x1 push` (review,
+-message) are part of this discipline, not a substitute for it.
+-
+-### Review before proposing the commit block
+-
+-After finishing a unit of work, **summarize what changed and stop
+-there**. Do not pre-emptively lay out the commit / push commands.
+-Wait for the user to signal review is complete before proposing
+-the commit block. Changes during review are the norm, not the
+-exception; proposing commit text too early creates noise and
+-signals that I consider the work done when it usually isn't.
+-
+-This applies per-step in a multi-step flow too — each step gets
+-a review pause before its commit block appears.
+-
+-Signals that review is complete include explicit approval ("let's
+-commit", "looks good, commit it") **and any directive to start the
+-next step** ("do step 4", "next", "go N+1"). In that case the
+-previous step must be committed first — always commit the current
+-step before starting the next; don't ask.
++### Run `vc-x1 push`
+ 
+-### Versioning
++`<bookmark>` below is the **app-side working branch** — the
++bookmark sitting at the tip of the chain `vc-x1 push` should
++advance and push. For most cycles this is `main`; for
++feature-branch work it's the feature-branch name (e.g.
++`init-clone-refactor`). Pass the literal name, not the
++placeholder. **`.claude` always pushes its `main`** regardless
++of the app-side bookmark passed (see
++[`.claude` cadence](#claude-cadence) — `.claude` is a linear
++journal).
++
++```
++vc-x1 push <bookmark>                                  # interactive (review + $EDITOR)
++vc-x1 push <bookmark> --title "..." --body "..."       # flags skip $EDITOR
++vc-x1 push <bookmark> --yes --title "..." --body "..." # full non-interactive
++vc-x1 push <bookmark> --dry-run                        # preview (no side effects)
++vc-x1 push <bookmark> --from commit-app                # resume from specific stage
++vc-x1 push --status                                    # show saved state
++vc-x1 push <bookmark> --restart                        # clear saved state; start fresh
++```
++
++**Bookmark mismatch is currently silent.** `vc-x1 push`
++doesn't verify that `<bookmark>` matches the working-copy
++chain — passing a bookmark whose tip isn't an ancestor of `@`
++will (silently) push that bookmark anyway, leaving your work
++unpushed. Always confirm `jj log -r <bookmark>..@` shows the
++commits you mean to send. A safety check is on the 0.42.0
++todo (`vc-x1 push: --scope` flag item).
+ 
+-Every plan must start with a version bump. Choose the approach based
+-on scope:
++The two approval gates are surfaced by push itself:
+ 
+-- **Single-step** (recommended for mechanical/focused changes): bump
+-  directly to `X.Y.Z`, implement in one commit. Simpler history.
+-- **Multi-step** (for scope that splits naturally into
+-  independently-reviewable steps): bump to `X.Y.Z-0`, implement
+-  across multiple `X.Y.Z-N` commits incrementing the numeric
+-  suffix. The final commit drops the suffix to close the ladder.
++1. **Review** — push prints `jj diff --stat` for both repos and
++   prompts `[y/N]`. Approve = "the work is done right".
++2. **Message** — push either uses `--title`/`--body` (non-editor
++   path) or opens `$EDITOR` on a template. Approve = "the message
++   reads right".
+ 
+-The plan should recommend one approach and get user approval before
+-starting.
++Both titles and bodies are the **same** across the two commits;
++only the `ochid:` trailer differs per repo. Push collects the
++pre-commit chids internally so you don't hand-manage them.
+ 
+-For multi-step:
++For the full flag list and stage machine, see `vc-x1 push --help`
++and `notes/chores-05.md > Add push subcommand (0.37.0)`.
+ 
+-1. Bump version to `X.Y.Z-0` with the plan and commit as a chore
+-   marker.
+-2. Implement in one or more `X.Y.Z-N` commits (increment N as
+-   needed). Every `X.Y.Z-N` commit is a complete checkpoint in
+-   its own right — the `-N` suffix only signals that more steps
+-   in the same ladder are coming, not that the commit is partial
+-   or exploratory. Run the full pre-commit checklist (including
+-   `notes/todo.md` and `notes/chores-*.md` updates) on every
+-   `-N` commit exactly as you would on a single-step release.
+-3. Final commit bumps to `X.Y.Z` (no suffix) to close the ladder.
++### Bot communication during the flow
+ 
+-Multi-step cycles surface the ladder at the top of
+-`notes/todo.md > ## In Progress` as a bullet list with `(done)` /
+-`(current)` markers — see the file's intro paragraph for the
+-format. Update the markers as each step ships so the In Progress
+-view stays current at a glance.
++When applying the flow on the user's behalf, use plain prose at
++each gate — no insider jargon ("Gate N signal", "Checkpoint N",
++etc.):
+ 
+-**Why numeric suffixes (`-0`, `-1`, …) rather than `-devN`:**
+-semver pre-release identifiers may consist of a single numeric
+-component, and they compare numerically per spec. So
+-`X.Y.Z-1 < X.Y.Z-2 < … < X.Y.Z` correctly orders the ladder:
+-each `-N` sorts before its final unsuffixed sibling. Cargo
+-accepts this form. The `-dev` prefix adds no information the
+-git log doesn't already convey and doubles typing per commit.
+-
+-The final release commit (no suffix) closes the ladder rather
+-than amending prior commits. This keeps history readable: a
+-chain of complete checkpoints ending in an `X.Y.Z` marker.
++1. **After completing the work** — summarize what changed
++   (file-by-file or feature-by-feature, terse) and end with
++   something like:
+ 
+-### Pre-commit checklist
++   > Work complete. Please review. On approval I'll prep the
++   > commit title and body for a second approval before pushing.
+ 
+-Before proposing a commit, run all of the following and fix any issues:
++2. **After review approval** — present the proposed `$TITLE` and
++   `$BODY` explicitly, then ask permission to run `vc-x1 push`.
++   Do **not** spell out the full
++   `vc-x1 push <bookmark> --yes --title "$TITLE" --body "$BODY"`
++   invocation by default — it's mechanical and obvious from the
++   title/body. Show it only on explicit request (verbose mode /
++   debugging).
+ 
+-1. `cargo check`
+-2. `cargo fmt`
+-3. `cargo clippy`
+-4. `cargo test`
+-5. `cargo test --release`
+-6. `cargo install --path . --locked` (if applicable) — `--locked`
+-   is required, **not optional**. See
+-   [notes/cargo-locked-issue.md](notes/cargo-locked-issue.md) for
+-   the full story; short version: plain `cargo install` ignores
+-   `Cargo.lock` and re-resolves dependencies from scratch, which
+-   can pick incompatible versions even when `cargo build` /
+-   `cargo test` succeed.
+-7. Retest after install
+-8. Update `notes/todo.md` — add to `## Done` if completing a task
+-9. Update `notes/chores-*.md` — add a subsection describing the change
+-10. Update `notes/README.md` — if functionality changed (new flags,
+-   new subcommands, changed behavior)
+-
+-Push's preflight re-runs `vc-x1 sync` + `cargo fmt` +
+-`cargo clippy --all-targets -- -D warnings` + `cargo test` as a
+-safety net. Run the checklist above locally anyway — fmt / clippy /
+-test iteration is cheaper in-conversation than bouncing off
+-preflight after review approval. Steps 6–7 (`cargo install --path .`
+-and retest) are **not** in push's preflight (project-specific); the
+-bot runs them.
++3. **After execution approval** — run the push command. `push`
++   handles commit + bookmark + push + finalize internally;
++   nothing should be output after the push command (finalize is
++   detached and absolute-last; see "After finalize: stop and
++   wait" below).
+ 
+-### Pre-step: `vc-x1 sync`
++### Pre-step: `vc-x1 sync` (still useful)
+ 
+ Push's preflight runs `vc-x1 sync --check` as its first step. Check
+ mode verifies divergence without applying — if anything is `behind`
+@@ -522,81 +829,26 @@
+   and re-run`. Inspect, run `vc-x1 sync --no-check`, then proceed.
+ - **`--quiet`**: no output; exit code is the only signal.
+ 
+-### Run `vc-x1 push`
+-
+-**Prerequisites — one-time per repo:**
+-
+-- `.gitignore` must include `/.vc-x1` so push's in-progress
+-  state files (`.vc-x1/push-state.toml`) don't get committed.
+-  Push warns at preflight if the entry is missing.
+-- The target bookmark must have a tracking remote
+-  (`jj bookmark track <bookmark>@origin -R .`). `jj git fetch`
+-  creates remote bookmarks as non-tracking by default; push
+-  currently surfaces this as a raw jj error at `push-app` after
+-  commits are locally made, so confirm tracking is set up
+-  before the first push in a new clone.
+-
+-**`vc-x1 push <bookmark>` wraps the full flow in one command with
+-two interactive approval gates.** Push runs preflight (sync + fmt
+-+ clippy + test), prompts for review, composes the commit message
+-(via `--title`/`--body` or `$EDITOR`), prompts for message
+-approval, then commits both repos → advances bookmarks → pushes
+-app → finalizes `.claude`. Failures inside the local mutation
+-window roll both repos back via `jj op restore`; after `push-app`
+-succeeds the remote boundary is crossed and recovery is
+-forward-only.
+-
+-```
+-vc-x1 push main                                      # interactive (review + $EDITOR)
+-vc-x1 push main --title "..." --body "..."           # flags skip $EDITOR
+-vc-x1 push main --yes --title "..." --body "..."     # full non-interactive
+-vc-x1 push main --dry-run                            # preview (no side effects)
+-vc-x1 push main --from commit-app                    # resume from specific stage
+-vc-x1 push --status                                  # show saved state
+-vc-x1 push main --restart                            # clear saved state; start fresh
+-```
+-
+-The two approval gates are surfaced by push itself:
+-
+-1. **Review** — push prints `jj diff --stat` for both repos and
+-   prompts `[y/N]`. Approve = "the work is done right".
+-2. **Message** — push either uses `--title`/`--body` (non-editor
+-   path) or opens `$EDITOR` on a template. Approve = "the message
+-   reads right".
+-
+-Both titles and bodies are the **same** across the two commits;
+-per-repo `ochid:` trailers are appended by push itself. See
+-[Commit message style](#commit-message-style) for body structure.
+-
+-For the full flag list and stage machine, see `vc-x1 push --help`.
+-
+-### Bot communication during the flow
+-
+-When applying the flow on the user's behalf, use plain prose at
+-each gate — no insider jargon ("Gate N signal", "Checkpoint N",
+-etc.):
+-
+-1. **After completing the work** — summarize what changed
+-   (file-by-file or feature-by-feature, terse) and end with
+-   something like:
++### After finalize: stop and wait
+ 
+-   > Work complete. Please review. On approval I'll prep the
+-   > commit title and body for a second approval before pushing.
++After `vc-x1 finalize` is launched — **whether mid-session per-step
++or at session end** — you **MUST NEVER** proceed to a next step, edit
++files, run tools, or emit any text (prose, recaps, acknowledgements),
++until the user explicitly directs you to continue. Treat finalize as
++a hard stop for the whole turn. Any final words (e.g. "next is ...")
++must be said in the approval prompt *before* executing finalize; the
++finalize `Bash` call is the last thing in the turn and nothing
++follows it.
+ 
+-2. **After review approval** — present the proposed `$TITLE` and
+-   `$BODY` explicitly, then ask permission to run `vc-x1 push`.
+-   Do **not** spell out the full
+-   `vc-x1 push <bookmark> --yes --title "$TITLE" --body "$BODY"`
+-   invocation by default — it's mechanical and obvious from the
+-   title/body. Show it only on explicit request (verbose mode /
+-   debugging).
++This holds even when the next step seems obvious (e.g. "next is
++N+1" or "now I should bump the version and commit the release").
++Wait. The user controls cadence — every push+finalize is a checkpoint
++they may want to inspect, think about, hand off, or take a break at.
++Auto-proceeding bypasses that checkpoint and produces unwanted writes
++between finalize and the next explicit instruction.
+ 
+-3. **After execution approval** — run the push command. `push`
+-   handles commit + bookmark + push + finalize internally;
+-   nothing should be output after the push command (finalize is
+-   detached and absolute-last; see
+-   [Finalize is the absolute last action](#finalize-is-the-absolute-last-action)
+-   below).
++Exceptions to this rule may emerge later but are not authorized at
++this stage. Until told otherwise, treat as absolute.
+ 
+ ### Late changes after push
+ 
+@@ -618,38 +870,6 @@
+ push's `finalize-claude` stage normally handles trailing session
+ writes so you rarely hit this case there.
+ 
+-### Finalize is the absolute last action
+-
+-`vc-x1 finalize` runs detached with `--squash` and a short
+-`--delay` so any writes the bot makes immediately after launching
+-finalize still land in the squash window and end up in the
+-session-repo commit. **That guarantee depends on finalize being
+-the last thing in the turn.**
+-
+-After `vc-x1 finalize` is launched — **whether mid-session
+-per-step or at session end** — you **MUST NEVER** proceed to a
+-next step, edit files, run tools, or emit any text (prose,
+-recaps, acknowledgements), until the user explicitly directs you
+-to continue. Treat finalize as a hard stop for the whole turn.
+-Any final words (e.g. "next is ...") must be said in the
+-approval prompt *before* executing finalize; the finalize `Bash`
+-call is the last thing in the turn and nothing follows it.
+-
+-This holds even when the next step seems obvious (e.g. "next is
+-N+1" or "now I should bump the version and commit the release").
+-Wait. The user controls cadence — every push+finalize is a
+-checkpoint they may want to inspect, think about, hand off, or
+-take a break at. Auto-proceeding bypasses that checkpoint and
+-produces unwanted writes between finalize and the next explicit
+-instruction.
+-
+-Do **not** echo or restate the finalize output — the Bash tool
+-already displays it. Any trailing text creates writes that miss
+-the finalize squash window.
+-
+-Exceptions to this rule may emerge later but are not authorized
+-at this stage. Until told otherwise, treat as absolute.
+-
+ ### Manual finalize fallback
+ 
+ If push exited before `finalize-claude` (e.g. `--no-finalize`
+@@ -660,9 +880,11 @@
+ vc-x1 finalize --repo .claude --squash --push <bookmark> --delay 10 --detach --log /tmp/vc-x1-finalize.log
+ ```
+ 
+-The same "finalize is the absolute last action" rule applies —
+-nothing should happen after finalize. If any work is done after
++**Nothing should happen after finalize** — no memory writes, no
++tool calls, no additional output. If any work is done after
+ finalize, run finalize again so the trailing writes are captured.
++Do **not** echo or restate the finalize output — the Bash tool
++already displays it.
+ 
+ **Clear push's saved state after any out-of-band recovery** —
+ manual `vc-x1 finalize`, manual `jj squash --ignore-immutable`
