@@ -1,4 +1,4 @@
-# vc-template-x1.claude
+# vc-x1-bot-repo-template
 
 This is the bot repo of a dual-repo convention for using
 a bot to help in the development of a coding project. The goal
@@ -7,12 +7,17 @@ partner main repo contains the "what". The key to the convention
 is each change is cross-referenced to the other. Thus there
 is a coherent story of the development of the project across time.
 
-The beginnings of that tool is [vc-x1](https://github.com/winksaville/vc-x1)
-and the minimum files necessary for this repo are created by `vc-x1`
-and vc-x1 uses this repo to populate a .claude repo with licenses
-and this README.md.
+This repo is the source template for the bot side:
+[vc-x1](https://github.com/winksaville/vc-x1) `init` copies its
+contents — the licenses, this README.md, and the empty
+`memory/MEMORY.md` — into a new project's `.claude` repo, then
+generates the remaining minimum files (such as `.vc-config.toml`)
+itself. `memory/MEMORY.md` is intentionally empty and expected to
+stay empty; it is seeded here because Claude tends to create it
+otherwise.
 
-See [vc-template-x1](https://github.com/winksaville/vc-template-x1) for more details.
+See [vc-x1-work-repo-template](https://github.com/winksaville/vc-x1-work-repo-template)
+for more details.
 
 ## License
 
